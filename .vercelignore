@@ -1,0 +1,9 @@
+server/
+node_modules/
+.git/
+.agent/
+openspec/
+*.md
+!README.md
+quizbuz.txt
+AGENTS.md
