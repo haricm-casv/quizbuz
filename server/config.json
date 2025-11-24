@@ -1,0 +1,19 @@
+{
+    "server": {
+        "wsPort": 3000,
+        "httpPort": 3001,
+        "maxClients": 10,
+        "heartbeatInterval": 10000
+    },
+    "quiz": {
+        "maxBuzzersPerRound": 1,
+        "autoLockAfterFirst": false,
+        "autoResetDelay": 5000,
+        "allowReconnect": true
+    },
+    "logging": {
+        "enabled": true,
+        "level": "info",
+        "roundHistorySize": 20
+    }
+}

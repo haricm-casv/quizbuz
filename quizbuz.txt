@@ -1,0 +1,674 @@
+Local Wi-Fi Quiz Buzzer System - Detailed Technical Specification
+1. System Architecture
+1.1 Network Topology
+┌─────────────────────────────────────────────────────┐
+│                  Local Wi-Fi Network                │
+│                    (No Internet)                    │
+│                                                     │
+│  ┌──────────────┐                                  │
+│  │   Laptop     │ ◄──── Server acts as             │
+│  │   (Server)   │       WebSocket host             │
+│  │ Node.js App  │       IP: 192.168.x.x:3000       │
+│  └──────┬───────┘                                  │
+│         │                                           │
+│         │ WebSocket Connections                    │
+│         │                                           │
+│  ┌──────┴─────────────────────────────────────┐   │
+│  │                                             │   │
+│  ▼              ▼              ▼              ▼   │
+│ ┌────┐       ┌────┐       ┌────┐       ┌────┐    │
+│ │PWA │       │PWA │       │PWA │  ...  │PWA │    │
+│ │ #1 │       │ #2 │       │ #3 │       │#10 │    │
+│ └────┘       └────┘       └────┘       └────┘    │
+│ Phone 1      Phone 2      Phone 3      Phone 10  │
+└─────────────────────────────────────────────────────┘
+1.2 Communication Protocol
+
+Primary: WebSocket (ws://) for real-time bidirectional communication
+Fallback: HTTP REST API for initial configuration and health checks
+Port Configuration:
+
+WebSocket Server: Port 3000
+HTTP Control Panel: Port 3001 (optional admin interface)
+
+
+
+
+2. Server Application (Node.js)
+2.1 Core Requirements
+2.1.1 Technology Stack
+json{
+  "runtime": "Node.js >= 18.x LTS",
+  "dependencies": {
+    "ws": "^8.x",
+    "express": "^4.x",
+    "cors": "^2.x",
+    "dotenv": "^16.x",
+    "uuid": "^9.x"
+  }
+}
+2.1.2 Server Responsibilities
+
+Connection Management
+
+Accept WebSocket connections from PWA clients
+Assign unique session IDs to each client
+Maintain active connection registry
+Handle reconnection logic (5-second timeout tolerance)
+Track connection health via ping/pong heartbeat (every 10 seconds)
+
+
+Quiz Round Management
+
+States: IDLE, READY, ACTIVE, LOCKED, RESULTS
+Enable/disable buzzer functionality
+Record buzzer press timestamps with microsecond precision
+Maintain ordered list of buzzer presses
+
+
+Data Models
+
+javascript   // Client Session
+   {
+     id: "uuid-v4",
+     teamName: "Team Alpha",
+     socketConnection: WebSocket,
+     connectedAt: timestamp,
+     lastHeartbeat: timestamp,
+     isActive: boolean
+   }
+
+   // Quiz Round
+   {
+     roundId: number,
+     state: "IDLE" | "READY" | "ACTIVE" | "LOCKED" | "RESULTS",
+     startTime: timestamp,
+     buzzerPresses: [
+       {
+         clientId: "uuid",
+         teamName: "Team Alpha",
+         timestamp: highResTimestamp,
+         order: 1
+       }
+     ],
+     settings: {
+       maxBuzzers: 3, // Lock after 3 presses
+       autoReset: boolean
+     }
+   }
+2.1.3 WebSocket Message Protocol
+Client → Server Messages
+javascript// 1. Register team
+{
+  type: "REGISTER",
+  payload: {
+    teamName: "Team Alpha"
+  }
+}
+
+// 2. Buzzer press
+{
+  type: "BUZZER_PRESS",
+  payload: {
+    clientId: "uuid",
+    clientTimestamp: timestamp
+  }
+}
+
+// 3. Heartbeat
+{
+  type: "PING",
+  payload: { clientId: "uuid" }
+}
+Server → Client Messages
+javascript// 1. Registration confirmation
+{
+  type: "REGISTERED",
+  payload: {
+    clientId: "uuid",
+    teamName: "Team Alpha",
+    serverTime: timestamp
+  }
+}
+
+// 2. Round state update
+{
+  type: "ROUND_STATE",
+  payload: {
+    state: "ACTIVE",
+    roundId: 1,
+    canBuzz: true
+  }
+}
+
+// 3. Buzzer acknowledgment
+{
+  type: "BUZZER_ACK",
+  payload: {
+    clientId: "uuid",
+    order: 1,
+    totalPresses: 1,
+    serverTimestamp: timestamp
+  }
+}
+
+// 4. Round results
+{
+  type: "ROUND_RESULTS",
+  payload: {
+    buzzerOrder: [
+      { teamName: "Team Alpha", order: 1, time: "0.123s" },
+      { teamName: "Team Beta", order: 2, time: "0.456s" }
+    ]
+  }
+}
+
+// 5. Connection list update
+{
+  type: "CLIENTS_UPDATE",
+  payload: {
+    connectedClients: [
+      { id: "uuid1", teamName: "Team Alpha", status: "ready" },
+      { id: "uuid2", teamName: "Team Beta", status: "ready" }
+    ],
+    totalCount: 2
+  }
+}
+```
+
+#### 2.1.4 REST API Endpoints (Express)
+
+**Quiz Master Control Panel**
+```
+POST   /api/round/start        - Start new round (enables buzzers)
+POST   /api/round/lock         - Manually lock buzzers
+POST   /api/round/reset        - Reset current round
+GET    /api/round/status       - Get current round state
+GET    /api/clients            - List all connected clients
+DELETE /api/clients/:id        - Disconnect specific client
+GET    /api/health             - Server health check
+POST   /api/settings           - Update quiz settings
+2.1.5 Server Features
+Core Features
+
+✅ Auto-discovery: Broadcast server IP on startup (console display)
+✅ Connection limit: Configurable (default 10 clients)
+✅ Buzzer lock modes:
+
+First N buzzers (configurable)
+Manual lock by quiz master
+Time-based auto-lock
+
+
+✅ Timestamp precision: Use process.hrtime.bigint() for microsecond accuracy
+✅ Automatic round history logging (last 20 rounds)
+
+Configuration File (config.json)
+json{
+  "server": {
+    "wsPort": 3000,
+    "httpPort": 3001,
+    "maxClients": 10,
+    "heartbeatInterval": 10000
+  },
+  "quiz": {
+    "maxBuzzersPerRound": 3,
+    "autoLockAfterFirst": false,
+    "autoResetDelay": 5000,
+    "allowReconnect": true
+  },
+  "logging": {
+    "enabled": true,
+    "level": "info",
+    "roundHistorySize": 20
+  }
+}
+```
+
+### 2.2 Server UI (Optional Terminal Interface)
+
+**Console Dashboard Display**
+```
+╔══════════════════════════════════════════════════╗
+║      LOCAL QUIZ BUZZER SYSTEM - SERVER          ║
+║  Server IP: 192.168.1.100                       ║
+║  WebSocket: ws://192.168.1.100:3000             ║
+║  Control Panel: http://192.168.1.100:3001       ║
+╠══════════════════════════════════════════════════╣
+║  Connected Clients: 5/10                        ║
+║  Round Status: ACTIVE                           ║
+║  Buzzer Presses: 2                              ║
+╠══════════════════════════════════════════════════╣
+║  1. Team Alpha      - 0.123s  [BUZZED]          ║
+║  2. Team Beta       - 0.456s  [BUZZED]          ║
+║  3. Team Gamma      - Ready                     ║
+║  4. Team Delta      - Ready                     ║
+║  5. Team Epsilon    - Ready                     ║
+╠══════════════════════════════════════════════════╣
+║  Commands: [S]tart  [R]eset  [L]ock  [Q]uit    ║
+╚══════════════════════════════════════════════════╝
+
+3. Client Application (Progressive Web App)
+3.1 Core Requirements
+3.1.1 Technology Stack
+json{
+  "framework": "Vanilla JavaScript (or React/Vue if preferred)",
+  "styling": "Material Design CSS / Tailwind CSS",
+  "offline": "Service Worker for offline capability",
+  "manifest": "Web App Manifest for installability"
+}
+3.1.2 PWA Configuration
+manifest.json
+json{
+  "name": "Quiz Buzzer",
+  "short_name": "Buzzer",
+  "description": "Local Quiz Buzzer Client",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#2196F3",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
+Service Worker (sw.js)
+javascript// Cache static assets for offline functionality
+// Note: WebSocket connections require network, 
+// but UI should be accessible offline
+const CACHE_NAME = 'buzzer-v1';
+const urlsToCache = [
+  '/',
+  '/index.html',
+  '/styles.css',
+  '/app.js',
+  '/icon-192.png'
+];
+```
+
+#### 3.1.3 UI Design Specification
+
+**Screen Layout**
+```
+┌─────────────────────────────────┐
+│  ╔═══════════════════════════╗  │ ← Header (40px)
+│  ║    QUIZ BUZZER SYSTEM     ║  │   Background: #2196F3
+│  ╚═══════════════════════════╝  │
+│                                 │
+│  ┌─────────────────────────┐   │ ← Connection Panel (100px)
+│  │ Status: ● Connected      │   │
+│  │ Server: 192.168.1.100    │   │
+│  │ Team: Team Alpha         │   │
+│  └─────────────────────────┘   │
+│                                 │
+│  ┌─────────────────────────┐   │ ← Status Message (60px)
+│  │  WAITING FOR ROUND TO   │   │   Font: 18px, Center aligned
+│  │       START...          │   │
+│  └─────────────────────────┘   │
+│                                 │
+│         ┌─────────┐             │ ← Buzzer Button (200x200px)
+│         │         │             │   Material raised button
+│         │  BUZZ!  │             │   Background: #4CAF50 (enabled)
+│         │         │             │              #9E9E9E (disabled)
+│         └─────────┘             │   Font: Bold 32px
+│                                 │   Ripple effect on tap
+│                                 │
+│  ┌─────────────────────────┐   │ ← Result Panel (80px)
+│  │  You buzzed: #1         │   │   Hidden until buzz registered
+│  │  Time: 0.123s           │   │
+│  └─────────────────────────┘   │
+│                                 │
+│  [Settings] [Disconnect]       │ ← Footer (50px)
+└─────────────────────────────────┘
+Color Scheme
+css:root {
+  --primary: #2196F3;        /* Blue */
+  --success: #4CAF50;        /* Green - Enabled */
+  --error: #F44336;          /* Red - Error */
+  --warning: #FF9800;        /* Orange - Locked */
+  --disabled: #9E9E9E;       /* Gray - Disabled */
+  --text-primary: #212121;
+  --text-secondary: #757575;
+  --background: #FAFAFA;
+}
+Button States
+StateBackgroundTextCursorActionDisabledGray"Waiting..."defaultNoneEnabledGreen"BUZZ!"pointerSend buzzer pressPressedYellow"BUZZED!"defaultShow confirmationLockedRed"LOCKED"not-allowedNone
+3.1.4 Client State Management
+Application States
+javascriptconst AppState = {
+  DISCONNECTED: 'disconnected',     // No server connection
+  CONNECTING: 'connecting',         // Attempting connection
+  CONNECTED: 'connected',           // Connected, no active round
+  READY: 'ready',                   // Round active, can buzz
+  BUZZED: 'buzzed',                 // User has pressed buzzer
+  LOCKED: 'locked',                 // Buzzer locked (late or round ended)
+  VIEWING_RESULTS: 'viewing_results' // Showing round results
+};
+```
+
+**State Machine**
+```
+DISCONNECTED → CONNECTING → CONNECTED → READY → BUZZED
+                    ↑           ↓          ↓       ↓
+                    └───────────┴──────────┴───────┘
+                         (reconnect/reset)
+```
+
+#### 3.1.5 Client Features
+
+**Connection Management**
+- ✅ Server IP input field (on first launch)
+- ✅ Auto-reconnect on connection loss (exponential backoff: 1s, 2s, 4s, 8s)
+- ✅ Connection status indicator (green/yellow/red dot)
+- ✅ Save server IP to localStorage
+
+**Team Registration**
+- ✅ Team name input (validated: 2-20 characters, alphanumeric + spaces)
+- ✅ Editable before round starts
+- ✅ Persistent storage across app restarts
+
+**Buzzer Interaction**
+- ✅ Large touch target (minimum 200x200px)
+- ✅ Haptic feedback on press (Vibration API)
+- ✅ Visual feedback: Color change + ripple animation
+- ✅ Audio feedback: Optional beep sound (50ms, 800Hz tone)
+- ✅ Double-tap prevention (debounce 500ms)
+- ✅ Wake lock during active rounds (Screen Wake Lock API)
+
+**User Feedback**
+- ✅ Toast notifications for:
+  - Connection status changes
+  - Round state changes
+  - Buzzer registration confirmation
+  - Errors
+- ✅ Loading spinner during connection attempts
+- ✅ Confetti animation on successful first buzz (optional)
+
+**Settings Panel**
+```
+┌─────────────────────────────────┐
+│ ⚙️ Settings                     │
+├─────────────────────────────────┤
+│ Server IP: [192.168.1.100]      │
+│ Team Name: [Team Alpha]         │
+│                                 │
+│ ☑ Sound Effects                 │
+│ ☑ Vibration                     │
+│ ☑ Keep Screen On                │
+│                                 │
+│ [Test Connection]               │
+│ [Save]  [Cancel]                │
+└─────────────────────────────────┘
+```
+
+---
+
+## 4. System Workflow
+
+### 4.1 Setup Phase
+
+**Step 1: Server Initialization**
+```
+1. Quiz master starts Node.js server on laptop
+2. Server displays:
+   - Local IP address (e.g., 192.168.1.100)
+   - WebSocket URL (ws://192.168.1.100:3000)
+   - QR code with connection URL (optional)
+3. Server enters IDLE state
+```
+
+**Step 2: Client Connection**
+```
+1. Participants open PWA on phones (via served HTML or localhost)
+2. Enter server IP: 192.168.1.100
+3. Enter team name: "Team Alpha"
+4. Click "Connect"
+5. Client establishes WebSocket connection
+6. Server acknowledges and adds to active clients list
+7. Client shows "Connected - Waiting for round"
+```
+
+### 4.2 Quiz Round Execution
+
+**Round Flow**
+```
+┌─────────────────────────────────────────────────────────┐
+│ Quiz Master Actions          │  Client State            │
+├─────────────────────────────────────────────────────────┤
+│ 1. Press "Start Round"       │  Button: Disabled (gray) │
+│ 2. Server broadcasts "READY" │  Button: Enabled (green) │
+│ 3. Ask question verbally     │  Status: "READY TO BUZZ" │
+│                              │                          │
+│ [Participants think...]      │  [Users can press]       │
+│                              │                          │
+│ 4. First buzz received       │  Team Alpha: "BUZZED!"   │
+│    - Lock other buzzers      │  Others: Locked (red)    │
+│    - Display order on server │  Show: "You are #1"      │
+│                              │                          │
+│ 5. Award/deduct points       │  All: Show results       │
+│ 6. Press "Reset Round"       │  Return to "Waiting"     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 4.3 Edge Cases & Error Handling
+
+**Client Disconnection**
+```
+Scenario: Phone network drops during active round
+Action:
+1. Server detects missed heartbeats (2 consecutive)
+2. Mark client as "disconnected" but retain session (60s grace period)
+3. If client reconnects within 60s:
+   - Restore previous state
+   - Sync current round status
+4. If timeout: Remove client from active list
+```
+
+**Server Restart**
+```
+Scenario: Server crashes mid-round
+Action:
+1. All clients detect connection loss
+2. Show "Reconnecting..." message
+3. Attempt reconnection every 3 seconds
+4. When server restarts:
+   - Clients re-register
+   - Server starts fresh (no round state persistence)
+   - Quiz master manually resets round
+```
+
+**Buzzer Race Condition**
+```
+Scenario: Two users press within 1ms
+Action:
+1. Server timestamps both with nanosecond precision
+2. Determine order based on server receipt time
+3. Send acknowledgment with order numbers
+4. Both see their position (e.g., "#1" and "#2")
+```
+
+**Network Latency**
+```
+Scenario: High latency (100ms+) on some devices
+Action:
+1. Client records local timestamp on press
+2. Sends both client and server timestamps
+3. Server uses server timestamp for ordering
+4. Calculate and display latency for each client
+5. Optional: Show warning if latency > 200ms
+
+5. Deployment & Testing
+5.1 Development Setup
+Server Development
+bash# Install dependencies
+npm install
+
+# Development mode (with hot reload)
+npm run dev
+
+# Production mode
+npm start
+Client Development
+bash# Serve PWA locally during development
+npx http-server -p 8080
+
+# Or bundle with Vite/Webpack for production
+npm run build
+```
+
+### 5.2 Local Network Deployment
+
+**Option A: Server Serves PWA**
+```
+Server (Express) serves static files:
+- HTML/CSS/JS at http://192.168.1.100:3001
+- WebSocket at ws://192.168.1.100:3000
+
+Participants access: http://192.168.1.100:3001
+```
+
+**Option B: Separate Static Server**
+```
+- Node.js server: WebSocket only (port 3000)
+- PWA hosted on separate HTTP server (port 8080)
+- Clients manually enter server IP in app
+```
+
+**Recommended: Option A** for simplicity (single entry point)
+
+### 5.3 Testing Checklist
+
+**Unit Tests**
+- [ ] WebSocket connection establishment
+- [ ] Message serialization/deserialization
+- [ ] Timestamp precision (microsecond accuracy)
+- [ ] Client session management
+- [ ] Round state transitions
+
+**Integration Tests**
+- [ ] 10 simultaneous client connections
+- [ ] Buzzer ordering with <1ms intervals
+- [ ] Client disconnection and reconnection
+- [ ] Round reset during active buzzing
+
+**UI/UX Tests**
+- [ ] Button responsiveness (<100ms feedback)
+- [ ] Haptic feedback on supported devices
+- [ ] Screen wake lock during rounds
+- [ ] Accessibility (screen reader, color contrast)
+
+**Network Tests**
+- [ ] Latency measurement (50-200ms range)
+- [ ] Packet loss simulation (5-10% drop rate)
+- [ ] Wi-Fi signal strength variation
+- [ ] Router hop count impact
+
+**Load Tests**
+- [ ] 10 clients buzzing within 100ms window
+- [ ] 50 consecutive rounds without memory leak
+- [ ] Server uptime (8 hours continuous operation)
+
+---
+
+## 6. Technical Constraints & Assumptions
+
+### 6.1 Constraints
+- **No Internet Required**: Entire system operates on LAN
+- **No External Services**: No cloud dependencies (Firebase, Pusher, etc.)
+- **Minimal Setup**: No complex router configuration (uses default DHCP)
+- **Cross-Platform Server**: Must run on Windows/Mac/Linux
+- **Mobile-First Client**: PWA optimized for Android Chrome (primary target)
+
+### 6.2 Assumptions
+- All devices connected to same Wi-Fi network
+- Server laptop has static/reserved DHCP IP (recommended)
+- Participants have modern browsers (Chrome 90+, Safari 14+)
+- WebSocket support available (ws://, not wss:// required)
+- Maximum 10 concurrent clients (scalable to 50 with optimization)
+
+---
+
+## 7. Future Enhancements (Phase 2)
+
+**Advanced Features**
+- ⭐ Leaderboard tracking across multiple rounds
+- ⭐ Admin web dashboard for quiz master (instead of terminal)
+- ⭐ Audio/visual alerts on server when buzzers pressed
+- ⭐ Export round results to CSV/JSON
+- ⭐ Custom buzzer sounds upload
+- ⭐ Team profiles with avatars
+- ⭐ Native Android/iOS apps (Flutter migration)
+- ⭐ Bluetooth fallback for poor Wi-Fi environments
+
+**Scalability**
+- Support 50+ clients with Redis for session storage
+- Distributed server setup (multiple Node.js instances)
+- Room-based system (multiple quizzes simultaneously)
+
+---
+
+## 8. File Structure
+```
+quiz-buzzer-system/
+├── server/
+│   ├── src/
+│   │   ├── index.js              # Main server entry
+│   │   ├── websocket.js          # WebSocket handler
+│   │   ├── routes.js             # Express API routes
+│   │   ├── quiz-manager.js       # Round management logic
+│   │   ├── client-manager.js     # Connection tracking
+│   │   └── utils/
+│   │       ├── timestamp.js      # High-res timing
+│   │       └── logger.js         # Console logging
+│   ├── config.json               # Server configuration
+│   ├── package.json
+│   └── README.md
+│
+├── client-pwa/
+│   ├── public/
+│   │   ├── index.html            # Main PWA page
+│   │   ├── manifest.json         # PWA manifest
+│   │   ├── sw.js                 # Service worker
+│   │   └── icons/
+│   │       ├── icon-192.png
+│   │       └── icon-512.png
+│   ├── src/
+│   │   ├── app.js                # Main application logic
+│   │   ├── websocket-client.js   # WS connection handler
+│   │   ├── ui.js                 # UI updates
+│   │   └── styles.css            # Material design styles
+│   └── README.md
+│
+├── docs/
+│   ├── API.md                    # WebSocket protocol docs
+│   ├── SETUP.md                  # Installation guide
+│   └── TESTING.md                # Testing procedures
+│
+└── README.md                     # Project overview
+
+9. Success Metrics
+System Performance
+
+Buzzer latency: <100ms (from button press to server acknowledgment)
+Connection reliability: 99.5% uptime during 8-hour quiz sessions
+Reconnection time: <3 seconds after temporary disconnection
+Timestamp precision: Microsecond-level accuracy
+
+User Experience
+
+Setup time: <5 minutes for all participants
+Button responsiveness: Instant visual feedback (<50ms)
+Error rate: <1% failed buzzer presses
+User satisfaction: Simple enough for non-technical quiz participants
+
+
+This specification provides a complete blueprint for building your local Wi-Fi quiz buzzer system with modern web technologies, ensuring low latency, reliability, and excellent user experience without requiring internet connectivity.

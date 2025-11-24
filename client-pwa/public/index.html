@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quiz Buzzer</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+    <meta name="theme-color" content="#2196F3">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>Quiz Buzzer</h1>
+            <div id="connection-status" class="status-indicator disconnected"></div>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Connection Panel -->
+            <div id="connection-panel" class="panel">
+                <div class="info-row">
+                    <span class="label">Server:</span>
+                    <span id="server-display" class="value">Not Connected</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Team:</span>
+                    <span id="team-display" class="value">--</span>
+                </div>
+            </div>
+
+            <!-- Game Status -->
+            <div id="game-status" class="status-message">
+                WAITING FOR CONNECTION...
+            </div>
+
+            <!-- Buzzer Button -->
+            <div class="buzzer-container">
+                <button id="buzzer-btn" class="buzzer" disabled>
+                    <span class="buzzer-text">BUZZ!</span>
+                    <span class="buzzer-ripple"></span>
+                </button>
+            </div>
+
+            <!-- Result Panel -->
+            <div id="result-panel" class="panel hidden">
+                <div class="result-content">
+                    <span class="result-label">You buzzed:</span>
+                    <span id="result-order" class="result-value">#1</span>
+                </div>
+                <div class="result-time">
+                    Time: <span id="result-time">0.123s</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <button id="settings-btn" class="icon-btn">⚙️ Settings</button>
+        </footer>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Settings</h2>
+                <div class="form-group">
+                    <label for="server-ip">Server IP</label>
+                    <input type="text" id="server-ip" placeholder="192.168.x.x">
+                </div>
+                <div class="form-group">
+                    <label for="team-name">Team Name</label>
+                    <input type="text" id="team-name" placeholder="Team Alpha">
+                </div>
+                <div class="modal-actions">
+                    <button id="save-settings-btn" class="primary-btn">Connect & Save</button>
+                    <button id="close-settings-btn" class="secondary-btn">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="src/ui.js"></script>
+    <script src="src/websocket-client.js"></script>
+    <script src="src/app.js"></script>
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('SW registered'))
+                    .catch(err => console.log('SW failed', err));
+            });
+        }
+    </script>
+</body>
+</html>
